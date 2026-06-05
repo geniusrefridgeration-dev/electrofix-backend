@@ -56,7 +56,7 @@ exports.register = async (req, res) => {
     customerId: customer._id,
   };
 
-  if (process.env.NODE_ENV === "development") {
+  if (process.env.NODE_ENV === "production") {
     responseData.devOTP = otp;
   }
 
@@ -188,7 +188,7 @@ exports.resendOTP = async (req, res) => {
   }
 
   const responseData = { success: true, message: "OTP resent successfully" };
-  if (process.env.NODE_ENV === "development") responseData.devOTP = otp;
+  if (process.env.NODE_ENV === "production") responseData.devOTP = otp;
 
   res.json(responseData);
 };

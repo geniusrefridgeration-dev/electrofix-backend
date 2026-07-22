@@ -8,6 +8,7 @@ const serviceCtrl   = require("../controllers/serviceController");
 const bookingCtrl   = require("../controllers/bookingController");
 const customerCtrl  = require("../controllers/customerController");
 const homeVisitCtrl = require("../controllers/homeVisitController");
+const employeeCtrl  = require("../controllers/employeeController");
 
 // AUTH
 router.post("/auth/login",        adminAuth.adminLogin);
@@ -39,15 +40,27 @@ router.delete("/services/:id/problems/:probId", protectAdmin, serviceCtrl.delete
 // BOOKINGS
 router.get("/bookings/stats",              protectAdmin, bookingCtrl.getBookingStats);
 router.get("/bookings/rejection-reasons",  protectAdmin, bookingCtrl.getRejectionReasons);
+router.get("/bookings/billing-summary",    protectAdmin, bookingCtrl.getBillingSummary);
 router.get("/bookings",                    protectAdmin, bookingCtrl.getAllBookings);
 router.get("/bookings/:id",                protectAdmin, bookingCtrl.getBookingById);
 router.put("/bookings/:id/status",         protectAdmin, bookingCtrl.updateBookingStatus);
+router.put("/bookings/:id/bill",           protectAdmin, bookingCtrl.generateBill);
+router.put("/bookings/:id/payment",        protectAdmin, bookingCtrl.updatePaymentStatus);
 
 // CUSTOMERS
 router.get   ("/customers",                 protectAdmin, customerCtrl.getAllCustomers);
 router.get   ("/customers/:id",             protectAdmin, customerCtrl.getCustomerById);
 router.put   ("/customers/:id/toggle-status", protectAdmin, customerCtrl.toggleCustomerStatus);
 router.delete("/customers/:id",             protectAdmin, customerCtrl.deleteCustomer);
+
+// EMPLOYEES
+router.get   ("/employees",                  protectAdmin, employeeCtrl.getEmployees);
+router.get   ("/employees/:id",              protectAdmin, employeeCtrl.getEmployeeById);
+router.post  ("/employees",                  protectAdmin, employeeCtrl.createEmployee);
+router.put   ("/employees/:id",              protectAdmin, employeeCtrl.updateEmployee);
+router.put   ("/employees/:id/toggle-active",protectAdmin, employeeCtrl.toggleEmployeeActive);
+router.post  ("/employees/:id/image",        protectAdmin, upload.single("image"), employeeCtrl.uploadEmployeeImage);
+router.delete("/employees/:id",              protectAdmin, employeeCtrl.deleteEmployee);
 
 // HOME VISIT CONFIG + SHOP LOCATION
 router.get("/home-visit-config",  protectAdmin, homeVisitCtrl.getConfig);

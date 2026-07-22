@@ -26,6 +26,22 @@ const bookingSchema = new mongoose.Schema(
     distanceKm:      { type: Number, default: 0 },
     totalAmount:     { type: Number, default: null },   // set by admin on complete
 
+    // Billing / Invoice
+    invoiceNumber: { type: String, default: null, unique: true, sparse: true },
+    billItems: [{
+      label:    { type: String, required: true },   // e.g. "Repair Charge", "Home Visit", "Spare Part"
+      amount:   { type: Number, required: true },
+      quantity: { type: Number, default: 1 },
+    }],
+    discount:        { type: Number, default: 0 },
+    gstPercent:      { type: Number, default: 0 },
+    gstAmount:       { type: Number, default: 0 },
+    grandTotal:      { type: Number, default: null },
+    paymentStatus:   { type: String, enum: ["unpaid", "paid", "partial"], default: "unpaid" },
+    paymentMethod:   { type: String, enum: ["cash", "upi", "card", "online", null], default: null },
+    paidAt:          { type: Date, default: null },
+    billGeneratedAt: { type: Date, default: null },
+
     status: {
       type: String,
       enum: ["pending", "accepted", "rejected", "dispatched", "completed", "cancelled"],
@@ -36,6 +52,14 @@ const bookingSchema = new mongoose.Schema(
     rejectionType:   { type: String, enum: ["predefined", "custom", null], default: null },
     adminNotes:      { type: String, default: null },
     scheduledDate:   { type: Date,   default: null },   // set by admin on accept
+
+    // Employee assignment — set when admin dispatches the booking
+    assignedEmployee: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
+    employeeSnapshot: {
+      name: String, mobile: String, designation: String,
+      profileImage: String, employeeIdCode: String,
+    },
+    assignedAt: { type: Date, default: null },
 
     // Cancellation
     cancelledBy:     { type: String, enum: ["customer", "admin", null], default: null },
@@ -62,6 +86,11 @@ bookingSchema.pre("save", async function (next) {
   if (!this.bookingId) {
     const count = await mongoose.model("Booking").countDocuments();
     this.bookingId = `EF${String(count + 1).padStart(6, "0")}`;
+  }
+  if (this.billGeneratedAt && !this.invoiceNumber) {
+    const year = new Date().getFullYear();
+    const count = await mongoose.model("Booking").countDocuments({ invoiceNumber: { $ne: null } });
+    this.invoiceNumber = `INV-${year}-${String(count + 1).padStart(5, "0")}`;
   }
   next();
 });

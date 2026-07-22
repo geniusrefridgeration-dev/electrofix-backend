@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 const Customer = require("../models/Customer");
 const { generateOTP, getOTPExpiry } = require("../utils/otp");
 const { sendOTPEmail } = require("../utils/email");
-const { sendOTPSMS } = require("../utils/sms");
+// const { sendOTPSMS } = require("../utils/sms");
 
 const generateToken = (id, role) => {
   return jwt.sign({ id, role }, process.env.JWT_SECRET, {
@@ -43,8 +43,6 @@ exports.register = async (req, res) => {
   // Send OTP via email if provided, otherwise SMS
   if (email) {
     sendOTPEmail(email, otp, name).catch(console.error);
-  } else {
-    sendOTPSMS(mobile, otp).catch(console.error);
   }
 
   // In development, show OTP in response
@@ -56,7 +54,7 @@ exports.register = async (req, res) => {
     customerId: customer._id,
   };
 
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === "development") {
     responseData.devOTP = otp;
   }
 
@@ -96,8 +94,6 @@ exports.login = async (req, res) => {
 
   if (customer.email) {
     sendOTPEmail(customer.email, otp, customer.name).catch(console.error);
-  } else {
-    sendOTPSMS(mobile, otp).catch(console.error);
   }
 
   const responseData = {
@@ -183,12 +179,10 @@ exports.resendOTP = async (req, res) => {
 
   if (customer.email) {
     sendOTPEmail(customer.email, otp, customer.name).catch(console.error);
-  } else {
-    sendOTPSMS(customer.mobile, otp).catch(console.error);
   }
 
   const responseData = { success: true, message: "OTP resent successfully" };
-  if (process.env.NODE_ENV === "production") responseData.devOTP = otp;
+  if (process.env.NODE_ENV === "development") responseData.devOTP = otp;
 
   res.json(responseData);
 };

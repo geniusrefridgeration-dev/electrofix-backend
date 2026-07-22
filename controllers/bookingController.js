@@ -2,6 +2,7 @@ const Booking = require("../models/Booking");
 const Customer = require("../models/Customer");
 const Admin = require("../models/Admin");
 const Service = require("../models/Service");
+const Employee = require("../models/Employee");
 const { sendAdminNotification, sendCustomerNotification } = require("../utils/notification");
 const { calculateDistance, getHomeVisitCharge, getShopCoords } = require("../utils/distance");
 const { sendBookingConfirmationEmail } = require("../utils/email");
@@ -158,7 +159,7 @@ exports.getBookingById = async (req, res) => {
  * @access  Private (Admin)
  */
 exports.updateBookingStatus = async (req, res) => {
-  const { status, rejectionReason, rejectionType, adminNotes } = req.body;
+  const { status, rejectionReason, rejectionType, adminNotes, employeeId } = req.body;
   const booking = await Booking.findById(req.params.id);
   if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
 
@@ -179,6 +180,10 @@ exports.updateBookingStatus = async (req, res) => {
     return res.status(400).json({ success: false, message: "Rejection reason is required" });
   }
 
+  if (status === "dispatched" && !employeeId) {
+    return res.status(400).json({ success: false, message: "Please select an employee to dispatch" });
+  }
+
   const { scheduledDate, totalAmount } = req.body;
 
   booking.status = status;
@@ -196,10 +201,33 @@ exports.updateBookingStatus = async (req, res) => {
     booking.rejectionReason = rejectionReason;
     booking.rejectionType = rejectionType || "custom";
   }
-  if (status === "dispatched") booking.dispatchedAt = now;
+  if (status === "dispatched") {
+    booking.dispatchedAt = now;
+
+    const employee = await Employee.findById(employeeId);
+    if (!employee) return res.status(404).json({ success: false, message: "Employee not found" });
+    if (!employee.isActive) return res.status(400).json({ success: false, message: "This employee is inactive" });
+
+    booking.assignedEmployee = employee._id;
+    booking.employeeSnapshot = {
+      name: employee.name,
+      mobile: employee.mobile,
+      designation: employee.designation,
+      profileImage: employee.profileImage,
+      employeeIdCode: employee.employeeIdCode,
+    };
+    booking.assignedAt = now;
+
+    employee.totalAssigned = (employee.totalAssigned || 0) + 1;
+    await employee.save();
+  }
   if (status === "completed") {
     booking.completedAt = now;
     if (totalAmount) booking.totalAmount = Number(totalAmount);
+
+    if (booking.assignedEmployee) {
+      await Employee.findByIdAndUpdate(booking.assignedEmployee, { $inc: { totalCompleted: 1 } });
+    }
   }
 
   await booking.save();
@@ -249,47 +277,61 @@ exports.getCustomerBookings = async (req, res) => {
  */
 exports.getBookingStats = async (req, res) => {
   const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
-  startOfWeek.setHours(0, 0, 0, 0);
+  const startOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfWeek  = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0,0,0,0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last6Months  = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-  const [todayCount, weekCount, monthCount, totalCount, statusBreakdown] = await Promise.all([
+  const [
+    todayCount, weekCount, monthCount, totalCount,
+    statusBreakdown, monthlyTrend,
+    revenueStats, topServices, ratingStats, cancelledCount
+  ] = await Promise.all([
     Booking.countDocuments({ createdAt: { $gte: startOfDay } }),
     Booking.countDocuments({ createdAt: { $gte: startOfWeek } }),
     Booking.countDocuments({ createdAt: { $gte: startOfMonth } }),
     Booking.countDocuments(),
+    Booking.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+    // Monthly trend last 6 months
     Booking.aggregate([
-      { $group: { _id: "$status", count: { $sum: 1 } } },
+      { $match: { createdAt: { $gte: last6Months } } },
+      { $group: { _id: { year: { $year: "$createdAt" }, month: { $month: "$createdAt" } }, count: { $sum: 1 }, revenue: { $sum: { $ifNull: ["$totalAmount", 0] } } } },
+      { $sort: { "_id.year": 1, "_id.month": 1 } },
     ]),
-  ]);
-
-  // Monthly bookings trend (last 6 months)
-  const monthlyTrend = await Booking.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: new Date(now.getFullYear(), now.getMonth() - 5, 1) },
-      },
-    },
-    {
-      $group: {
-        _id: { year: { $year: "$createdAt" }, month: { $month: "$createdAt" } },
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { "_id.year": 1, "_id.month": 1 } },
+    // Revenue stats
+    Booking.aggregate([
+      { $match: { status: "completed", totalAmount: { $exists: true, $gt: 0 } } },
+      { $group: {
+        _id: null,
+        total:     { $sum: "$totalAmount" },
+        thisMonth: { $sum: { $cond: [{ $gte: ["$completedAt", startOfMonth] }, "$totalAmount", 0] } },
+        today:     { $sum: { $cond: [{ $gte: ["$completedAt", startOfDay] }, "$totalAmount", 0] } },
+        avgOrder:  { $avg: "$totalAmount" },
+      }},
+    ]),
+    // Top services
+    Booking.aggregate([
+      { $group: { _id: "$service.serviceName", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 5 },
+    ]),
+    // Rating stats
+    Booking.aggregate([
+      { $match: { rating: { $exists: true, $gt: 0 } } },
+      { $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } },
+    ]),
+    Booking.countDocuments({ status: "cancelled" }),
   ]);
 
   res.json({
     success: true,
     stats: {
-      today: todayCount,
-      thisWeek: weekCount,
-      thisMonth: monthCount,
-      total: totalCount,
-      statusBreakdown,
-      monthlyTrend,
+      today: todayCount, thisWeek: weekCount, thisMonth: monthCount, total: totalCount,
+      statusBreakdown, monthlyTrend,
+      cancelled: cancelledCount,
+      revenue: revenueStats[0] || { total: 0, thisMonth: 0, today: 0, avgOrder: 0 },
+      topServices,
+      rating: ratingStats[0] || { avg: 0, count: 0 },
     },
   });
 };
@@ -366,4 +408,92 @@ exports.rateBooking = async (req, res) => {
   await booking.save();
 
   res.json({ success: true, booking });
+};
+
+/**
+ * @route   PUT /api/admin/bookings/:id/bill
+ * @desc    Generate / update invoice for a booking (admin only)
+ * @access  Private (Admin)
+ */
+exports.generateBill = async (req, res) => {
+  const { billItems, discount, gstPercent, paymentStatus, paymentMethod } = req.body;
+
+  const booking = await Booking.findById(req.params.id);
+  if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+
+  if (!Array.isArray(billItems) || billItems.length === 0) {
+    return res.status(400).json({ success: false, message: "At least one bill item is required" });
+  }
+
+  const subtotal = billItems.reduce((sum, item) => sum + (Number(item.amount) * (Number(item.quantity) || 1)), 0);
+  const discountAmt = Number(discount) || 0;
+  const afterDiscount = Math.max(0, subtotal - discountAmt);
+  const gstPct = Number(gstPercent) || 0;
+  const gstAmt = Math.round((afterDiscount * gstPct) / 100);
+  const grandTotal = afterDiscount + gstAmt;
+
+  booking.billItems    = billItems;
+  booking.discount      = discountAmt;
+  booking.gstPercent    = gstPct;
+  booking.gstAmount     = gstAmt;
+  booking.grandTotal    = grandTotal;
+  booking.totalAmount   = grandTotal;   // keep in sync with existing field
+  if (paymentStatus) booking.paymentStatus = paymentStatus;
+  if (paymentMethod) booking.paymentMethod = paymentMethod;
+  if (paymentStatus === "paid" && !booking.paidAt) booking.paidAt = new Date();
+  if (!booking.billGeneratedAt) booking.billGeneratedAt = new Date();
+
+  await booking.save();
+
+  res.json({ success: true, booking });
+};
+
+/**
+ * @route   PUT /api/admin/bookings/:id/payment
+ * @desc    Update payment status only (e.g. mark as paid later)
+ * @access  Private (Admin)
+ */
+exports.updatePaymentStatus = async (req, res) => {
+  const { paymentStatus, paymentMethod } = req.body;
+  const booking = await Booking.findById(req.params.id);
+  if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+
+  if (paymentStatus) booking.paymentStatus = paymentStatus;
+  if (paymentMethod) booking.paymentMethod = paymentMethod;
+  if (paymentStatus === "paid" && !booking.paidAt) booking.paidAt = new Date();
+
+  await booking.save();
+  res.json({ success: true, booking });
+};
+
+/**
+ * @route   GET /api/admin/bookings/billing-summary
+ * @desc    Revenue summary — paid/unpaid totals, by date range
+ * @access  Private (Admin)
+ */
+exports.getBillingSummary = async (req, res) => {
+  const { from, to } = req.query;
+  const match = { totalAmount: { $ne: null } };
+  if (from || to) {
+    match.completedAt = {};
+    if (from) match.completedAt.$gte = new Date(from);
+    if (to)   match.completedAt.$lte = new Date(to);
+  }
+
+  const bookings = await Booking.find(match).select("bookingId totalAmount grandTotal paymentStatus paymentMethod completedAt customerSnapshot.name");
+
+  const totalRevenue = bookings.reduce((s, b) => s + (b.grandTotal || b.totalAmount || 0), 0);
+  const paid    = bookings.filter(b => b.paymentStatus === "paid");
+  const unpaid  = bookings.filter(b => b.paymentStatus !== "paid");
+  const paidAmt   = paid.reduce((s, b) => s + (b.grandTotal || b.totalAmount || 0), 0);
+  const unpaidAmt = unpaid.reduce((s, b) => s + (b.grandTotal || b.totalAmount || 0), 0);
+
+  res.json({
+    success: true,
+    summary: {
+      totalRevenue, paidAmount: paidAmt, unpaidAmount: unpaidAmt,
+      totalBills: bookings.length, paidCount: paid.length, unpaidCount: unpaid.length,
+    },
+    bookings,
+  });
 };

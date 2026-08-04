@@ -425,26 +425,33 @@ exports.generateBill = async (req, res) => {
     return res.status(400).json({ success: false, message: "At least one bill item is required" });
   }
 
-  const subtotal = billItems.reduce((sum, item) => sum + (Number(item.amount) * (Number(item.quantity) || 1)), 0);
-  const discountAmt = Number(discount) || 0;
-  const afterDiscount = Math.max(0, subtotal - discountAmt);
-  const gstPct = Number(gstPercent) || 0;
-  const gstAmt = Math.round((afterDiscount * gstPct) / 100);
-  const grandTotal = afterDiscount + gstAmt;
+  const subtotal     = billItems.reduce((sum, item) => sum + (Number(item.amount) * (Number(item.quantity) || 1)), 0);
+  const discountAmt  = Number(discount) || 0;
+  const afterDiscount= Math.max(0, subtotal - discountAmt);
+  const gstPct       = Number(gstPercent) || 0;
+  const gstAmt       = Math.round((afterDiscount * gstPct) / 100);
+  const grandTotal   = afterDiscount + gstAmt;
 
   booking.billItems    = billItems;
-  booking.discount      = discountAmt;
-  booking.gstPercent    = gstPct;
-  booking.gstAmount     = gstAmt;
-  booking.grandTotal    = grandTotal;
-  booking.totalAmount   = grandTotal;   // keep in sync with existing field
+  booking.discount     = discountAmt;
+  booking.gstPercent   = gstPct;
+  booking.gstAmount    = gstAmt;
+  booking.grandTotal   = grandTotal;
+  booking.totalAmount  = grandTotal;
   if (paymentStatus) booking.paymentStatus = paymentStatus;
   if (paymentMethod) booking.paymentMethod = paymentMethod;
   if (paymentStatus === "paid" && !booking.paidAt) booking.paidAt = new Date();
-  if (!booking.billGeneratedAt) booking.billGeneratedAt = new Date();
+
+  // Generate invoice number only once, using timestamp + random to guarantee uniqueness
+  if (!booking.invoiceNumber) {
+    booking.billGeneratedAt = new Date();
+    const year    = new Date().getFullYear();
+    const ts      = Date.now().toString().slice(-6);      // last 6 digits of timestamp
+    const rand    = Math.floor(Math.random() * 100).toString().padStart(2, "0");
+    booking.invoiceNumber = `INV-${year}-${ts}${rand}`;  // e.g. INV-2025-73421506
+  }
 
   await booking.save();
-
   res.json({ success: true, booking });
 };
 

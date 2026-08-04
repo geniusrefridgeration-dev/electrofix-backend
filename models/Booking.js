@@ -84,13 +84,10 @@ const bookingSchema = new mongoose.Schema(
 
 bookingSchema.pre("save", async function (next) {
   if (!this.bookingId) {
-    const count = await mongoose.model("Booking").countDocuments();
-    this.bookingId = `EF${String(count + 1).padStart(6, "0")}`;
-  }
-  if (this.billGeneratedAt && !this.invoiceNumber) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model("Booking").countDocuments({ invoiceNumber: { $ne: null } });
-    this.invoiceNumber = `INV-${year}-${String(count + 1).padStart(5, "0")}`;
+    // Use timestamp + random to avoid duplicate key on concurrent bookings
+    const ts   = Date.now().toString().slice(-6);
+    const rand = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+    this.bookingId = `EF${ts}${rand}`;   // e.g. EF734215006
   }
   next();
 });

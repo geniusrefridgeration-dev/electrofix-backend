@@ -143,6 +143,28 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   await connectDB();
+
+  // ── Fix invoiceNumber index (sparse) ─────────────────────────────────────
+  // The old index allowed only ONE null value. Drop it and recreate as sparse
+  // so multiple bookings without an invoice can coexist.
+  try {
+    const Booking = require("./models/Booking");
+    const collection = Booking.collection;
+
+    // Drop old broken index if it exists
+    await collection.dropIndex("invoiceNumber_1").catch(() => {});
+
+    // Recreate correct sparse unique index
+    await collection.createIndex(
+      { invoiceNumber: 1 },
+      { unique: true, sparse: true, background: true }
+    );
+    console.log("✅ invoiceNumber index OK");
+  } catch (e) {
+    console.log("invoiceNumber index check:", e.message);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   server.listen(PORT, () => {
     console.log("\n⚡ ================================");
     console.log(`⚡  ElectroFix Backend`);

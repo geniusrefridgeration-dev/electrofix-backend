@@ -98,6 +98,23 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // ========================
+// ONE-TIME INDEX FIX (call once after deploy)
+// ========================
+app.get("/api/fix-indexes", async (req, res) => {
+  try {
+    const Booking = require("./models/Booking");
+    await Booking.collection.dropIndex("invoiceNumber_1").catch(() => {});
+    await Booking.collection.createIndex(
+      { invoiceNumber: 1 },
+      { unique: true, sparse: true }
+    );
+    res.json({ success: true, message: "invoiceNumber index fixed! You can ignore this endpoint now." });
+  } catch (e) {
+    res.json({ success: false, message: e.message });
+  }
+});
+
+// ========================
 // HEALTH CHECK
 // ========================
 app.get("/api/health", (req, res) => {
